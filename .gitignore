@@ -1,0 +1,29 @@
+# Local configuration and credentials
+.env
+.env.*
+.env~
+!/.env.example
+!/.env.acceptance.example
+!/infra/postgres/.env.db.example
+
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Model files and local outputs
+models/
+artifacts/
+logs/
+*.log
+
+# Operating system metadata
+.DS_Store
+Thumbs.db

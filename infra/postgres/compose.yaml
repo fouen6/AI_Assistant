@@ -1,0 +1,24 @@
+name: ai-assistant-study
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    env_file: 
+      - .env.db
+    environment:
+      POSTGRES_USER: ai_study
+      POSTGRES_DB: ai_assistant
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "ai_study", "-d", "ai_assistant"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+
+volumes:
+  pgdata:

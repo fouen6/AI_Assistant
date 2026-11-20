@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#171e30">
+<title>企业智能助手 · 管理后台</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/vendor/vue.global.prod.js">
+</script>
+</head>
+<body>
+<div id="app" v-cloak>
+<auth-gate v-if="!user" admin :busy="busy" :error="error" @login="login">
+</auth-gate>
+<div v-else class="app-frame">
+<button v-if="sidebarOpen" class="sidebar-overlay mobile-only" aria-label="关闭导航" @click="sidebarOpen=false">
+</button>
+<aside class="sidebar admin-sidebar" :class="{'is-open':sidebarOpen}" aria-label="管理导航">
+<div class="sidebar-brand-row">
+<brand dark>
+</brand>
+<button class="icon-button mobile-only" aria-label="收起导航" @click="sidebarOpen=false">
+<icon name="x">
+</icon>
+</button>
+</div>
+<div class="admin-nav-section">WORKSPACE / 管理工作台</div>
+<nav class="admin-nav">
+<button v-for="n in navigation" :key="n.key" class="admin-nav-button" :class="{selected:tab===n.key}" :aria-current="tab===n.key?'page':null" :disabled="busy" @click="switchTab(n.key)">
+<icon :name="n.icon" :size="18">
+</icon>{{n.label}}<icon v-if="tab===n.key" name="chevron" :size="13" style="margin-left:auto;transform:rotate(-90deg)">
+</icon>
+</button>
+</nav>
+<div class="spacer">
+</div>
+<div class="sidebar-bottom">
+<div class="sidebar-user">
+<span class="avatar">{{avatar}}</span>
+<div class="user-text">
+<div class="sidebar-user-name">{{user.username}}</div>
+<div class="sidebar-user-role">管理员</div>
+</div>
+<button class="icon-button small" aria-label="个人设置" :disabled="busy" @click="openProfile">
+<icon name="settings" :size="17">
+</icon>
+</button>
+<button class="icon-button small" aria-label="退出登录" @click="logout">
+<icon name="logout" :size="17">
+</icon>
+</button>
+</div>
+<div class="sidebar-links">
+<a href="/">
+<icon name="back" :size="14">
+</icon>返回助手</a>
+<span class="spacer">
+</span>
+<span style="font-size:9px;color:#5f6b88">ADMIN CONSOLE</span>
+</div>
+</div>
+</aside>
+<main class="admin-content">
+<header class="topbar">
+<div class="topbar-title">
+<button class="icon-button mobile-only" aria-label="打开管理导航" @click="sidebarOpen=true">
+<icon name="menu">
+</icon>
+</button>
+<div class="breadcrumbs">
+<span>工作台</span>
+<icon name="chevron" :size="12" style="transform:rotate(-90deg)">
+</icon>
+<strong>{{currentPage.label}}</strong>
+</div>
+</div>
+<div class="topbar-actions">
+<a class="button button-ghost button-small desktop-only" href="/">前往助手<icon name="arrow" :size="13">
+</icon>
+</a>
+<span class="topbar-divider">
+</span>
+<div class="topbar-account">
+<span>{{user.username}}</span>
+<div class="avatar">{{avatar}}</div>
+</div>
+</div>
+</header>
+<div class="admin-scroll">
+<div class="page-heading">
+<div>
+<div class="eyebrow" style="font-size:9px;margin-bottom:7px">{{currentPage.english}}</div>
+<h1>{{currentPage.label}}</h1>
+<p>{{currentPage.description}}</p>
+</div>
+<button class="button button-secondary" :disabled="busy" @click="reloadTab">
+<icon name="refresh" :size="15" :class="{spin:busy}">
+</icon>刷新列表</button>
+</div>
+<div v-if="error" class="notice notice-error" role="alert" style="margin-bottom:20px">{{error}}</div>
+<div v-if="info" class="notice notice-success" role="status" style="margin-bottom:20px">{{info}}</div>
+<div v-if="localPending" class="notice notice-warning" style="margin-bottom:20px">
+<div class="notice-title">一条审批提交需要核对</div>请先查询原请求，避免重复执行。<div class="notice-actions">
+<button class="button button-small button-secondary" :disabled="busy" @click="reconcile">查询处理结果</button>
+<button v-if="lastDecision" class="button button-small button-ghost" :disabled="busy" @click="repeatDecision">重试同一请求</button>
+</div>
+<details class="raw-details" style="margin-top:8px">
+<summary>请求标识</summary>
+<pre>{{JSON.stringify(localPending,null,2)}}</pre>
+</details>
+</div>
+<template v-if="tab==='approvals'">
+<div v-if="state" class="admin-state">
+<div style="display:flex;align-items:center;gap:10px">
+<icon name="shield" :size="17" style="color:var(--green)">
+</icon>
+<strong style="font-size:12px">最近处理的会话</strong>
+<status-pill :value="state.status">
+</status-pill>
+<span class="spacer">
+</span>
+<button class="icon-button small" aria-label="收起最近处理结果" @click="state=null">
+<icon name="x" :size="15">
+</icon>
+</button>
+</div>
+<p style="font-size:12px;margin-top:12px;white-space:pre-wrap">{{state.reply||'尚未形成最终回答，请核对会话状态。'}}</p>
+<p class="field-note">会话 {{shortId(state.session_id)}} · 累计模拟通知 {{state.send_count||0}} 次</p>
+<details class="raw-details">
+<summary>核对工具结果与完整状态</summary>
+<pre>{{JSON.stringify(state,null,2)}}</pre>
+</details>
+</div>
+<section class="panel">
+<div class="panel-toolbar">
+<div class="filter-tabs" aria-label="审批状态筛选">
+<button v-for="f in approvalFilters" :key="f.value" :class="{selected:filter===f.value}" :disabled="busy" @click="setFilter(f.value)">{{f.label}}</button>
+</div>
+<label class="search-field">
+<icon name="search" :size="15">
+</icon>
+<input v-model="query" aria-label="搜索审批记录" placeholder="搜索收件人、正文或会话"/>
+</label>
+</div>
+<div class="table-wrap">
+<table class="data-table">
+<thead>
+<tr>
+<th>通知请求</th>
+<th>审批状态</th>
+<th>执行状态</th>
+<th>登记时间</th>
+<th style="text-align:right">操作</th>
+</tr>
+</thead>
+<tbody>
+<tr v-for="r in visibleApprovals" :key="r.interrupt_id">
+<td>
+<div class="request-person">
+<icon name="mail" :size="15">
+</icon>{{r.args_json?.recipient||r.tool_name}}</div>
+<div class="request-content" :title="r.args_json?.content">{{r.args_json?.content||'—'}}</div>
+<div class="secondary-text mono">会话 {{shortId(r.session_id)}}</div>
+</td>
+<td>
+<status-pill :value="r.decision_status">
+</status-pill>
+</td>
+<td>
+<status-pill :value="r.execution_status">
+</status-pill>
+</td>
+<td class="nowrap">{{formatDate(r.registered_at)}}</td>
+<td>
+<div class="table-actions">
+<button class="button button-small" :class="r.decision_status==='pending'?'button-primary':'button-secondary'" :disabled="busy" @click="review=r;dialog='review'">{{r.decision_status==='pending'?'查看并审批':'查看记录'}}<icon name="arrow" :size="12">
+</icon>
+</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div v-if="!visibleApprovals.length" class="empty-state">
+<div class="empty-icon">
+<icon name="shield" :size="23">
+</icon>
+</div>
+<h3>{{query?'没有匹配的审批记录':filter==='pending'?'暂时没有待审批请求':'暂无相关记录'}}</h3>
+<p>{{query?'换个关键词试试。':'模拟通知提交后，会在这里留下审批记录。'}}</p>
+</div>
+<footer class="panel-footer">
+<span>显示 {{visibleApprovals.length}} 条 · 当前筛选最多加载 50 条</span>
+<span>操作前请核对完整正文</span>
+</footer>
+</section>
+</template>
+<template v-if="tab==='documents'">
+<div class="mini-stats">
+<div class="mini-stat">
+<span class="suggestion-icon">
+<icon name="file" :size="18">
+</icon>
+</span>
+<div>
+<strong>{{documents.length}}</strong>
+<div class="mini-stat-label">已加载文档</div>
+</div>
+</div>
+<div class="mini-stat">
+<span class="suggestion-icon">
+<icon name="layers" :size="18">
+</icon>
+</span>
+<div>
+<strong>{{chunkCount}}</strong>
+<div class="mini-stat-label">已加载知识片段</div>
+</div>
+</div>
+<div class="mini-stat">
+<span class="suggestion-icon">
+<icon name="book" :size="18">
+</icon>
+</span>
+<div>
+<strong style="font-size:15px">TXT / MD</strong>
+<div class="mini-stat-label">支持的文档格式</div>
+</div>
+</div>
+</div>
+<div class="upload-zone" :class="{dragging}" @dragover.prevent="dragging=true" @dragleave.prevent="dragging=false" @drop.prevent="dropFile">
+<span class="upload-zone-icon">
+<icon name="upload" :size="23">
+</icon>
+</span>
+<div class="upload-copy">
+<h3>{{uploading?'正在解析文档与建立索引…':'把企业知识带进工作台'}}</h3>
+<p>拖入文件或点击选择 · UTF-8 编码 · 单文件不超过 5 MB</p>
+<div v-if="file" class="upload-file-name">{{file.name}} <span class="muted">· {{formatSize(file.size)}}</span>
+</div>
+</div>
+<div class="upload-actions">
+<input type="file" ref="file" class="sr-only" accept=".txt,.md" aria-label="选择知识文档" :disabled="busy" @change="chooseFile($event.target.files[0])"/>
+<button class="button button-secondary" :disabled="busy" @click="$refs.file.click()">
+<icon name="plus" :size="14">
+</icon>选择文件</button>
+<button class="button button-primary" :disabled="busy||!file" @click="upload">
+<span v-if="uploading" class="spinner">
+</span>
+<icon v-else name="upload" :size="14">
+</icon>{{uploading?'正在入库':'上传并入库'}}</button>
+</div>
+</div>
+<section class="panel">
+<div class="panel-toolbar">
+<div>
+<h2 class="panel-title">知识文档</h2>
+<p class="panel-subtitle">上传后即可供智能体检索，回答时保留原文出处。</p>
+</div>
+<label class="search-field">
+<icon name="search" :size="15">
+</icon>
+<input v-model="query" aria-label="搜索文档" placeholder="按文件名或文档 ID 搜索"/>
+</label>
+</div>
+<div class="table-wrap">
+<table class="data-table documents-table">
+<thead>
+<tr>
+<th>文件名称</th>
+<th>知识片段</th>
+<th>上传时间</th>
+<th style="text-align:right">操作</th>
+</tr>
+</thead>
+<tbody>
+<tr v-for="d in visibleDocuments" :key="d.id">
+<td>
+<div class="file-cell">
+<span class="file-symbol">
+<icon name="file" :size="19">
+</icon>
+</span>
+<div>
+<div class="primary-text">{{d.filename}}</div>
+<div class="secondary-text mono" :title="d.id">{{shortId(d.id)}}</div>
+</div>
+</div>
+</td>
+<td>{{d.chunk_count}} <span class="muted">块</span>
+</td>
+<td class="nowrap">{{formatDate(d.created_at,true)}}</td>
+<td>
+<div class="table-actions">
+<button class="icon-button small danger" aria-label="删除文档" :title="'删除 '+d.filename" :disabled="busy" @click="deleting=d;dialog='delete'">
+<icon name="trash" :size="16">
+</icon>
+</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div v-if="!visibleDocuments.length" class="empty-state">
+<div class="empty-icon">
+<icon name="book" :size="23">
+</icon>
+</div>
+<h3>{{query?'没有找到这个文档':'知识库还在等待第一份资料'}}</h3>
+<p>{{query?'试试其他文件名或文档 ID。':'上传员工手册、项目说明或其他工作资料。'}}</p>
+</div>
+<footer class="panel-footer">
+<span>显示 {{visibleDocuments.length}} 份 · 最多加载 100 份</span>
+<span>删除不改变既有会话历史</span>
+</footer>
+</section>
+</template>
+<template v-if="tab==='users'">
+<section class="panel">
+<div class="panel-toolbar">
+<div>
+<h2 class="panel-title">工作台成员</h2>
+<p class="panel-subtitle">管理角色与账号状态，权限始终由服务端核验。</p>
+</div>
+<label class="search-field">
+<icon name="search" :size="15">
+</icon>
+<input v-model="query" aria-label="搜索成员" placeholder="搜索用户名"/>
+</label>
+</div>
+<div class="table-wrap">
+<table class="data-table users-table">
+<thead>
+<tr>
+<th>成员</th>
+<th>角色</th>
+<th>账号状态</th>
+<th style="text-align:right">操作</th>
+</tr>
+</thead>
+<tbody>
+<tr v-for="u in visibleUsers" :key="u.id">
+<td>
+<div class="member-info">
+<span class="member-avatar">{{u.username.slice(0,1)}}</span>
+<div>
+<div class="primary-text">{{u.username}}<span v-if="u.id===user.id" class="member-current">你</span>
+</div>
+<div class="secondary-text">ID · {{u.id}}</div>
+</div>
+</div>
+</td>
+<td>
+<span class="role-tag" :class="{employee:u.role!=='admin'}">
+<icon :name="u.role==='admin'?'shield':'user'" :size="12">
+</icon>{{roleLabel(u.role)}}</span>
+</td>
+<td>
+<span class="status-pill" :class="u.is_active?'pill-green':'pill-slate'">
+<span class="status-dot">
+</span>{{u.is_active?'已启用':'已停用'}}</span>
+</td>
+<td>
+<div class="table-actions">
+<button class="button button-small button-secondary" :disabled="busy" @click="editUser(u)">
+<icon name="settings" :size="13">
+</icon>管理</button>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div v-if="!visibleUsers.length" class="empty-state">
+<div class="empty-icon">
+<icon name="users" :size="23">
+</icon>
+</div>
+<h3>没有匹配的成员</h3>
+<p>请尝试其他用户名。</p>
+</div>
+<footer class="panel-footer">
+<span>显示 {{visibleUsers.length}} 位 · 最多加载 100 位</span>
+<span>账号修改可能使已有登录身份失效</span>
+</footer>
+</section>
+</template>
+</div>
+</main>
+<modal v-if="dialog==='review'&&review" :title="review.decision_status==='pending'?'核对并审批通知':'审批记录'" wide @close="closeDialog">
+<div class="review-meta">
+<span class="mono">会话 {{shortId(review.session_id)}}</span>
+<span>{{formatDate(review.registered_at,true)}}</span>
+</div>
+<div style="display:flex;gap:8px;margin-bottom:19px">
+<status-pill :value="review.decision_status">
+</status-pill>
+<status-pill :value="review.execution_status">
+</status-pill>
+</div>
+<div class="kv-row">
+<span class="kv-label">收件人</span>
+<strong class="kv-value">{{review.args_json?.recipient||'—'}}</strong>
+</div>
+<div class="review-notice">
+<h3>通知正文 · 按提交原样展示</h3>
+<p>{{review.args_json?.content||'—'}}</p>
+</div>
+<p class="field-note" style="margin-top:17px">这是模拟通知。批准后执行模拟工具；拒绝后不执行。审批意见与收件人的意愿无关。</p>
+<div v-if="review.decided_by" class="field-note">审批人 {{review.decided_by}} · {{formatDate(review.decided_at,true)}}</div>
+<div v-if="review.result_text" class="review-notice">
+<h3>执行结果</h3>
+<p>{{review.result_text}}</p>
+</div>
+<div v-if="error" class="notice notice-error" role="alert" style="margin-top:16px">{{error}}</div>
+<details class="raw-details">
+<summary>完整审批标识与记录</summary>
+<pre>{{JSON.stringify(review,null,2)}}</pre>
+</details>
+<template #footer>
+<button class="button button-secondary" :disabled="busy" @click="closeDialog">{{review.decision_status==='pending'?'暂不处理':'关闭'}}</button>
+<template v-if="review.decision_status==='pending'">
+<button class="button button-danger-light" :disabled="busy||!!localPending" @click="decide(review,false)">
+<icon name="x" :size="14">
+</icon>拒绝</button>
+<button class="button button-primary" :disabled="busy||!!localPending" @click="decide(review,true)">
+<span v-if="busy" class="spinner">
+</span>
+<icon v-else name="check" :size="14">
+</icon>批准并执行</button>
+</template>
+</template>
+</modal>
+<modal v-if="dialog==='delete'&&deleting" title="删除知识文档" @close="closeDialog">
+<p style="font-size:13px">确定删除 <strong>{{deleting.filename}}</strong>？</p>
+<div class="danger-box">文档及对应知识片段将从当前检索中移除。既有对话和历史操作记录会保留。</div>
+<p class="source-id">文档 ID · {{deleting.id}}</p>
+<div v-if="error" class="notice notice-error" role="alert">{{error}}</div>
+<template #footer>
+<button class="button button-secondary" :disabled="busy" @click="closeDialog">取消</button>
+<button class="button button-danger" :disabled="busy" @click="removeDocument">
+<icon name="trash" :size="14">
+</icon>确认删除</button>
+</template>
+</modal>
+<modal v-if="dialog==='user'&&editing" title="管理成员" @close="closeDialog">
+<div class="member-info" style="margin-bottom:25px">
+<span class="member-avatar">{{editing.username.slice(0,1)}}</span>
+<div>
+<b>{{editing.username}}</b>
+<p class="field-note" style="margin:0">账号 ID · {{editing.id}}</p>
+</div>
+</div>
+<label class="field">
+<span>成员角色</span>
+<select v-model="editing.next_role" class="input">
+<option value="employee">普通员工</option>
+<option value="admin">管理员</option>
+</select>
+</label>
+<label class="field">
+<span>账号状态</span>
+<select v-model="editing.next_active" class="input">
+<option :value="true">已启用</option>
+<option :value="false">已停用</option>
+</select>
+</label>
+<div class="notice notice-warning">角色或状态改变后，该账号原有登录身份会失效，需要重新登录。服务端会保护最后一个可用管理员。</div>
+<div v-if="error" class="notice notice-error" role="alert" style="margin-top:14px">{{error}}</div>
+<template #footer>
+<button class="button button-secondary" :disabled="busy" @click="closeDialog">取消</button>
+<button class="button button-primary" :disabled="busy" @click="saveUser">保存修改</button>
+</template>
+</modal>
+<modal v-if="dialog==='profile'" title="个人设置" @close="closeDialog">
+<div class="profile-summary">
+<div class="avatar avatar-large">{{avatar}}</div>
+<h3>{{user.username}}</h3>
+<p>管理员</p>
+</div>
+<p class="field-note" style="margin-bottom:12px">选择你的头像</p>
+<div class="avatar-options">
+<button v-for="(label,key) in avatarChoices" :key="key" class="avatar-choice" :class="{selected:avatarDraft===key}" :aria-label="avatarLabels[key]" :aria-pressed="avatarDraft===key" @click="avatarDraft=key">{{label}}</button>
+</div>
+<template #footer>
+<button class="button button-secondary" @click="closeDialog">取消</button>
+<button class="button button-primary" :disabled="busy" @click="saveAvatar">保存设置</button>
+</template>
+</modal>
+</div>
+</div>
+<noscript>请启用 JavaScript 以使用管理工作台。</noscript>
+<script type="module" src="/static/admin.js">
+</script>
+</body>
+</html>

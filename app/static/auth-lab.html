@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>企业智能助手 · 账号</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/vendor/vue.global.prod.js">
+</script>
+</head>
+<body>
+<div id="app" v-cloak>
+<auth-gate v-if="!user" register :busy="busy" :error="infoIsError?info:''" :info="infoIsError?'':info" @login="login" @register="register">
+</auth-gate>
+<main v-else class="auth-main" style="min-height:100dvh">
+<section style="width:100%;max-width:470px">
+<brand>
+</brand>
+<h1 style="font-size:26px;margin-top:35px">欢迎，{{user.username}}</h1>
+<p class="auth-description">登录身份已确认，可前往助手开始工作。</p>
+<div class="identity-card">
+<div class="identity-top">
+<span class="avatar avatar-large">
+<icon name="user" :size="26">
+</icon>
+</span>
+<div>
+<h3>{{user.username}}</h3>
+<p class="field-note">{{roleLabel(user.role)}} · {{user.is_active?'已启用':'已停用'}}</p>
+</div>
+</div>
+<div class="identity-actions">
+<a class="button button-primary" href="/">前往助手<icon name="arrow" :size="14">
+</icon>
+</a>
+<a v-if="user.role==='admin'" class="button button-secondary" href="/admin">管理工作台</a>
+</div>
+<p class="field-note">安全起见，各页面独立登录。</p>
+<details class="raw-details">
+<summary>查看账号字段</summary>
+<pre>{{JSON.stringify(user,null,2)}}</pre>
+</details>
+</div>
+<p v-if="info" class="notice" :class="infoIsError?'notice-error':'notice-success'" style="margin-top:20px" role="status">{{info}}</p>
+<div style="display:flex;gap:10px;margin-top:20px">
+<button class="button button-secondary" :disabled="busy" @click="refreshIdentity">
+<icon name="refresh" :size="14">
+</icon>重新读取身份</button>
+<button class="button button-ghost" @click="logout">退出登录</button>
+</div>
+</section>
+</main>
+</div>
+<script type="module" src="/static/login.js">
+</script>
+</body>
+</html>

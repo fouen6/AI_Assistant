@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#5852d9">
+<title>企业智能助手</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='11' fill='%235852d9'/%3E%3Cpath d='m20 7 4 9 9 4-9 4-4 9-4-9-9-4 9-4Z' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/vendor/vue.global.prod.js">
+</script>
+</head>
+<body>
+<div id="app" v-cloak>
+<auth-gate v-if="!user" :busy="busy" :error="error" @login="login">
+</auth-gate>
+<div v-else class="app-frame">
+<button v-if="sidebarOpen" class="sidebar-overlay mobile-only" aria-label="关闭导航" @click="sidebarOpen=false">
+</button>
+<aside class="sidebar" :class="{'is-open':sidebarOpen}" aria-label="会话导航">
+<div class="sidebar-brand-row">
+<brand>
+</brand>
+<button class="icon-button mobile-only" aria-label="收起导航" @click="sidebarOpen=false">
+<icon name="x">
+</icon>
+</button>
+</div>
+<button class="button button-primary new-chat-button" :disabled="busy" @click="openNew">
+<icon name="plus" :size="17">
+</icon>开启新对话<span class="key-hint">NEW</span>
+</button>
+<label class="search-field">
+<icon name="search" :size="15">
+</icon>
+<input v-model="sessionQuery" placeholder="搜索已加载的会话" aria-label="搜索会话"/>
+</label>
+<div class="sidebar-heading">
+<span>最近会话</span>
+<span>{{sessions.length}}</span>
+</div>
+<nav class="session-list" aria-label="历史会话">
+<button v-for="s in filteredSessions" :key="s.id" class="session-item" :class="{selected:s.id===sid}" :aria-current="s.id===sid?'page':null" :disabled="busy" @click="selectSession(s.id)">
+<icon :name="s.mode==='agent'?'bolt':'chat'" :size="16">
+</icon>
+<span class="session-content">
+<span class="session-title">{{sessionTitle(s)}}</span>
+<span class="session-meta">{{s.mode==='agent'?'智能体':'普通对话'}} · {{formatDate(s.created_at)}}</span>
+</span>
+<i v-if="s.id===sid" class="session-active-dot">
+</i>
+</button>
+<p v-if="!filteredSessions.length" class="sidebar-empty">{{sessionQuery?'没有匹配的会话':'还没有对话，开始第一次提问吧。'}}</p>
+</nav>
+<div class="sidebar-bottom">
+<div class="sidebar-user">
+<span class="avatar">{{avatar}}</span>
+<div class="user-text">
+<div class="sidebar-user-name">{{user.username}}</div>
+<div class="sidebar-user-role">{{roleLabel(user.role)}}</div>
+</div>
+<button class="icon-button small" aria-label="个人设置" title="个人设置" :disabled="busy" @click="openProfile">
+<icon name="settings" :size="17">
+</icon>
+</button>
+<button class="icon-button small" aria-label="退出登录" title="退出登录" @click="logout">
+<icon name="logout" :size="17">
+</icon>
+</button>
+</div>
+<div class="sidebar-links">
+<a v-if="user.role==='admin'" href="/admin">
+<icon name="shield" :size="13">
+</icon>管理工作台 <icon name="arrow" :size="12">
+</icon>
+</a>
+<span v-else>每一次提问，都更进一步。</span>
+<span class="spacer">
+</span>
+<span class="sidebar-tag">AI 助手</span>
+</div>
+</div>
+</aside>
+<main class="chat-workspace">
+<header class="topbar">
+<div class="topbar-title">
+<button class="icon-button mobile-only" aria-label="打开会话导航" @click="sidebarOpen=true">
+<icon name="menu">
+</icon>
+</button>
+<div>
+<h2 class="topbar-heading">{{currentSession?sessionTitle(currentSession):'你的 AI 工作台'}}</h2>
+<p class="topbar-caption">{{currentSession?formatDate(currentSession.created_at,true):'知识、工具与协作，汇聚于此。'}}</p>
+</div>
+<span v-if="sid" class="mode-badge" :class="{agent:currentMode==='agent'}">
+<icon :name="currentMode==='agent'?'bolt':'chat'" :size="12">
+</icon>{{modeLabel}}</span>
+</div>
+<div class="topbar-actions">
+<status-pill v-if="snapshot" :value="snapshot.status">
+</status-pill>
+<template v-if="sid">
+<span class="topbar-divider">
+</span>
+<button class="icon-button" :disabled="busy||loading" aria-label="刷新当前会话" title="只读刷新" @click="refresh">
+<icon name="refresh" :size="17" :class="{spin:loading}">
+</icon>
+</button>
+<button class="icon-button" :disabled="!snapshot" aria-label="查看会话详情" title="会话详情" @click="dialog='details'">
+<icon name="info" :size="18">
+</icon>
+</button>
+</template>
+</div>
+</header>
+<div ref="scroll" class="chat-scroll">
+<div v-if="loading&&!snapshot" class="load-state">
+<span class="spinner">
+</span>正在读取会话…</div>
+<section v-else-if="!visibleMessages.length&&!aborter" class="welcome-shell">
+<div class="welcome">
+<div class="welcome-emblem">
+<icon name="brand" :size="32">
+</icon>
+</div>
+<div class="eyebrow">A CLEARER WAY TO WORK</div>
+<h1>你好，{{user.username}}<br>今天想<span>一起完成什么？</span>
+</h1>
+<p class="welcome-description">查一条制度，理清一个问题，或让工具帮你迈出下一步。</p>
+<div class="suggestions">
+<button v-for="s in suggestions" :key="s.title" class="suggestion-card" :disabled="busy" @click="useSuggestion(s)">
+<span class="suggestion-icon">
+<icon :name="s.icon" :size="17">
+</icon>
+</span>
+<icon class="icon" name="arrow" :size="14">
+</icon>
+<h3 class="suggestion-title">{{s.title}}</h3>
+<p class="suggestion-desc">{{s.desc}}</p>
+</button>
+</div>
+<div class="welcome-footnote">
+<icon name="shield" :size="12">
+</icon>通知操作需要管理员审批；你始终可以查看原文与工具结果。</div>
+</div>
+</section>
+<section v-else class="conversation" aria-label="对话记录">
+<div class="conversation-meta">{{modeLabel}} · {{shortId(sid)}}</div>
+<article v-for="m in visibleMessages" :key="m.id" class="message-row" :class="m.role">
+<span class="avatar" :class="m.role==='human'?'avatar-user':'avatar-assistant'">
+<template v-if="m.role==='human'">{{avatar}}</template>
+<icon v-else name="brand" :size="21">
+</icon>
+</span>
+<div class="message-body">
+<div class="message-author">{{m.role==='human'?'你':'企业智能助手'}}</div>
+<div class="message-text">{{m.content}}</div>
+<div v-if="m.role==='ai'" class="message-actions">
+<button class="icon-button small" :class="{copied:copied===m.id}" :aria-label="copied===m.id?'已复制':'复制回答'" title="复制回答" @click="copyMessage(m)">
+<icon :name="copied===m.id?'check':'copy'" :size="14">
+</icon>
+</button>
+<status-pill v-if="m.answer_status&&m.answer_status!=='model_text'" :value="m.answer_status">
+</status-pill>
+</div>
+<details v-if="m.evidence?.length" class="source-details">
+<summary>原文依据 · {{m.evidence.length}} 条</summary>
+<div v-for="e in m.evidence" :key="e.source_id" class="source-card">
+<b>{{e.filename}} · 块 {{e.chunk_id}}</b>
+<span class="source-id">文档 {{e.document_id}}</span>
+<p>{{e.quote}}</p>
+</div>
+</details>
+</div>
+</article>
+<article v-if="aborter&&sendingText" class="message-row human">
+<span class="avatar avatar-user">{{avatar}}</span>
+<div class="message-body">
+<div class="message-author">你 · 正在提交</div>
+<div class="message-text">{{sendingText}}</div>
+</div>
+</article>
+<details v-if="snapshot?.tools?.length" class="tool-strip">
+<summary>本轮工具记录 · {{snapshot.tools.length}} 步</summary>
+<div class="tool-step" v-for="t in snapshot.tools" :key="t.tool_call_id">
+<div class="tool-step-header">
+<span>{{t.name}}</span>
+<status-pill :value="t.status">
+</status-pill>
+</div>
+<div class="source-id">{{t.tool_call_id}}</div>
+<pre>{{JSON.stringify(t.args,null,2)}}</pre>
+<pre>{{t.result}}</pre>
+</div>
+</details>
+<div v-for="p in snapshot?.pending||[]" :key="p.interrupt_id" class="approval-card">
+<div class="approval-card-header">
+<icon name="clock" :size="19">
+</icon>等待管理员审批</div>
+<div class="kv-list">
+<div class="kv-row">
+<span class="kv-label">收件人</span>
+<span class="kv-value">{{p.value?.args?.recipient||'—'}}</span>
+</div>
+<div class="kv-row">
+<span class="kv-label">通知正文</span>
+<span class="kv-value">{{p.value?.args?.content||'—'}}</span>
+</div>
+</div>
+<p class="field-note">审批完成前不会执行模拟通知。完成后点击顶部刷新查看结果。</p>
+<a v-if="user.role==='admin'" class="button button-small button-secondary" href="/admin" style="margin-top:12px">前往审批中心<icon name="arrow" :size="13">
+</icon>
+</a>
+</div>
+<div v-if="preview" class="message-row draft-row">
+<span class="avatar avatar-assistant">
+<icon name="brand" :size="21">
+</icon>
+</span>
+<div class="message-body">
+<div class="draft-label">
+<span class="spinner" style="width:11px;height:11px">
+</span>正在生成 · 临时草稿</div>
+<div class="message-text">{{preview}}</div>
+</div>
+</div>
+<div v-if="busy&&aborter" class="processing" role="status">
+<span class="loading-dots">
+<i>
+</i>
+<i>
+</i>
+<i>
+</i>
+</span>{{currentMode==='agent'?'正在处理任务，等待工具或最终结果…':'企业智能助手正在回复…'}}</div>
+</section>
+</div>
+<footer class="composer-area">
+<div class="composer-inner">
+<div v-if="error" class="notice notice-error" role="alert">{{error}}</div>
+<div v-if="localPending&&!aborter" class="notice notice-warning">
+<div class="notice-title">有一条提交需要确认</div>为避免重复执行，请先查询原请求的处理结果。<div class="notice-actions">
+<button class="button button-small button-secondary" :disabled="busy" @click="reconcile">查询处理结果</button>
+<button v-if="retryPayload" class="button button-small button-ghost" :disabled="busy" @click="retry">重试同一请求</button>
+</div>
+</div>
+<p v-if="snapshot?.write_blocked||snapshot?.status==='incomplete'" class="composer-tip">
+<icon name="info" :size="14">
+</icon>当前会话未完成，请先核对详情或开启新对话。</p>
+<p v-if="transportInfo" class="transport-message" role="status">{{transportInfo}}</p>
+<div class="composer">
+<label class="sr-only" for="message">输入消息</label>
+<textarea id="message" ref="composer" v-model="message" :placeholder="composerPlaceholder" :disabled="busy||!snapshot||!!localPending||snapshot?.status==='awaiting_approval'||snapshot?.status==='incomplete'||snapshot?.write_blocked" rows="2" @keydown="composerKeydown">
+</textarea>
+<div class="composer-bottom">
+<div class="composer-options">
+<span class="composer-mode">
+<icon :name="currentMode==='agent'?'bolt':'chat'" :size="12">
+</icon>{{modeLabel}}</span>
+<label class="check-option">
+<input v-model="stream" type="checkbox" :disabled="busy"/>流式接收</label>
+</div>
+<button v-if="aborter" class="send-button stop-button" aria-label="停止接收" title="停止接收不会撤销服务端操作" @click="aborter.abort()">
+<icon name="square" :size="15">
+</icon>
+</button>
+<button v-else class="send-button" aria-label="发送消息" title="发送消息" :disabled="cannotSend" @click="send">
+<icon name="send" :size="17">
+</icon>
+</button>
+</div>
+</div>
+<div class="composer-hint">
+<span>回答请结合原文核对，重要操作由你决定。</span>
+<span>Enter 发送 · Shift + Enter 换行</span>
+</div>
+</div>
+</footer>
+</main>
+<modal v-if="dialog==='new'" title="开启新对话" @close="dialog=''">
+<p class="field-note" style="margin:0 0 18px">为这次对话选择合适的工作方式。</p>
+<div class="mode-choices">
+<button class="mode-choice" :class="{selected:newMode==='chat'}" @click="newMode='chat'">
+<icon class="icon" name="chat">
+</icon>
+<div>
+<h3>普通对话</h3>
+<p>交流想法、解释概念，保留会话上下文。</p>
+</div>
+<icon v-if="newMode==='chat'" class="icon" name="check" :size="16">
+</icon>
+</button>
+<button class="mode-choice" :class="{selected:newMode==='agent'}" @click="newMode='agent'">
+<icon class="icon" name="bolt">
+</icon>
+<div>
+<h3>智能体</h3>
+<p>查询企业知识、调用计算工具、发起模拟通知审批。</p>
+</div>
+<icon v-if="newMode==='agent'" class="icon" name="check" :size="16">
+</icon>
+</button>
+</div>
+<template #footer>
+<button class="button button-secondary" :disabled="busy" @click="dialog=''">取消</button>
+<button class="button button-primary" :disabled="busy" @click="createSession">
+<span v-if="busy" class="spinner">
+</span>开始对话<icon name="arrow" :size="15">
+</icon>
+</button>
+</template>
+</modal>
+<modal v-if="dialog==='profile'" title="个人设置" @close="dialog=''">
+<div class="profile-summary">
+<div class="avatar avatar-large">{{avatar}}</div>
+<h3>{{user.username}}</h3>
+<p>{{roleLabel(user.role)}}</p>
+</div>
+<p class="field-note" style="margin-bottom:12px">选择你的头像</p>
+<div class="avatar-options">
+<button v-for="(label,key) in avatarChoices" :key="key" class="avatar-choice" :class="{selected:avatarDraft===key}" :aria-label="avatarLabels[key]" :aria-pressed="avatarDraft===key" @click="avatarDraft=key">{{label}}</button>
+</div>
+<template #footer>
+<button class="button button-secondary" @click="dialog=''">取消</button>
+<button class="button button-primary" :disabled="busy" @click="saveAvatar">保存设置</button>
+</template>
+</modal>
+<modal v-if="dialog==='details'&&snapshot" title="会话详情" wide @close="dialog=''">
+<div class="details-stats">
+<div class="detail-stat">
+<strong>{{snapshot.model_calls||0}}</strong>
+<span>本轮模型请求</span>
+</div>
+<div class="detail-stat">
+<strong>{{snapshot.messages?.length||0}}</strong>
+<span>历史消息</span>
+</div>
+<div class="detail-stat">
+<strong>{{snapshot.send_count||0}}</strong>
+<span>累计模拟通知</span>
+</div>
+</div>
+<div class="kv-list">
+<div class="kv-row">
+<span class="kv-label">会话状态</span>
+<span>
+<status-pill :value="snapshot.status">
+</status-pill>
+</span>
+</div>
+<div class="kv-row">
+<span class="kv-label">会话 ID</span>
+<span class="kv-value mono">{{sid}}</span>
+</div>
+<div v-if="snapshot.stop_reason" class="kv-row">
+<span class="kv-label">停止原因</span>
+<span class="kv-value">{{snapshot.stop_reason}}</span>
+</div>
+</div>
+<details class="raw-details">
+<summary>完整状态与原始消息</summary>
+<pre>{{JSON.stringify(snapshot,null,2)}}</pre>
+</details>
+</modal>
+</div>
+<div v-if="toast" class="toast" role="status">{{toast}}</div>
+</div>
+<noscript>请启用 JavaScript 以使用企业智能助手工作台。</noscript>
+<script type="module" src="/static/chat.js">
+</script>
+</body>
+</html>
